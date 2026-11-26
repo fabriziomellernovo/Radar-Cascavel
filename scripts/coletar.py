@@ -2,18 +2,7 @@ import json, urllib.request, urllib.parse, time, pathlib, datetime, html, re, os
 BASE="https://sapl.cascavel.pr.leg.br"
 def require(ok,msg):
     if not ok: raise RuntimeError(msg)
-def get(url):
-    require(urllib.parse.urlsplit(url).netloc=="sapl.cascavel.pr.leg.br","Host inesperado")
-    for i in range(3):
-        try:
-            with urllib.request.urlopen(urllib.request.Request(url,headers={"Accept":"application/json","User-Agent":"Radar-Cascavel/1.0 (public civic data)"}),timeout=40) as f:
-                require(urllib.parse.urlsplit(f.geturl()).netloc=="sapl.cascavel.pr.leg.br","Redirecionamento inesperado")
-                data=json.load(f)
-            time.sleep(.2)
-            return data
-        except Exception:
-            if i==2: raise
-            time.sleep(2**i)
+from acesso import get
 def collect(path):
     url=BASE+"/api/"+path+"/?format=json"
     rows=[]; seen=set(); count=None
