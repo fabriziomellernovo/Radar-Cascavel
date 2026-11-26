@@ -4,16 +4,21 @@ def require(ok,msg):
     if not ok: raise RuntimeError(msg)
 from acesso import get
 def collect(path):
-    url=BASE+"/api/"+path+"/?format=json"
+    url=BASE+"/api/"+path+"/?format=json&page_size=500"
     rows=[]; seen=set(); count=None
     while url:
         url=urllib.parse.urljoin(BASE,url).replace("http://","https://",1)
         require(url not in seen and len(seen)<5000,"Paginação inválida")
         seen.add(url); d=get(url)
-        require(isinstance(d,dict) and isinstance(d.get("results"),list) and isinstance(d.get("count"),int),"Formato inesperado: "+path)
-        if count is None: count=d["count"]
-        require(count==d["count"],"Contagem mudou durante coleta")
-        rows+=d["results"]; url=d.get("next")
+        require(isinstance(d,dict) and isinstance(d.get("results"),list) and isinstance(d.get("pagination"),dict),"Formato inesperado: "+path)
+        p=d["pagination"]
+        require(isinstance(p.get("total_entries"),int) and p.get("page")==len(seen),"Metadados inválidos")
+        if count is None: count=p["total_entries"]
+        require(count==p["total_entries"],"Contagem mudou durante coleta")
+        require(p.get("start_index")==len(rows)+1 and p.get("end_index")==len(rows)+len(d["results"]),"Intervalo de página inconsistente")
+        rows+=d["results"]; url=p["links"]["next"]
+        require(bool(url)==(len(rows)<count),"Paginação terminou incorretamente")
+        print(path,len(rows),"/",count,flush=True)
         require(len(rows)<=count,"Excesso de registros")
     require(len(rows)==count and count>0,"Coleta incompleta: "+path)
     require(all(isinstance(x.get("id"),int) for x in rows) and len({x["id"] for x in rows})==count,"IDs inválidos ou duplicados")
