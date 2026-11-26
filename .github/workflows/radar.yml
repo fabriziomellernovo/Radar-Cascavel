@@ -5,7 +5,6 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'scripts/coletar.py'
       - '.github/workflows/radar.yml'
 permissions:
   contents: read
@@ -15,18 +14,23 @@ concurrency:
 jobs:
   validar:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Coletar e validar (falha impede publicação)
-        run: python scripts/coletar.py
-      - name: Guardar diagnóstico
+      - name: Validar filtros de escopo
+        run: python scripts/diagnostico_escopo.py
+      - name: Coletar bases iniciais sem dados pessoais
+        run: python scripts/coleta_escopo.py
+      - name: Guardar diagnóstico e bases completas por etapa
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: diagnostico
-          path: candidate-counts.json
+          name: coleta-escopo
+          path: |
+            scope-report.json
+            staging/*.json
           if-no-files-found: ignore
+          retention-days: 30
