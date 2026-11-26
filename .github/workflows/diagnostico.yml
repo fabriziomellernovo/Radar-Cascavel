@@ -1,0 +1,22 @@
+name: Diagnóstico API SAPL
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/diagnostico.yml'
+      - 'scripts/diagnostico.py'
+permissions:
+  contents: read
+jobs:
+  schema:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Examinar formato oficial
+        run: python3 scripts/diagnostico.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: schema-report
+          path: schema-report.json
