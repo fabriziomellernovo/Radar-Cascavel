@@ -6,21 +6,27 @@ out=pathlib.Path("staging")
 out.mkdir(exist_ok=True)
 def require(ok,msg):
     if not ok: raise RuntimeError(msg)
-def collect(name,path,params,valid,fields,expected=None):
+def collect(name,path,params,valid,fields,expected=None,*,allow_empty=False,distinct=None):
     url=BASE+"/api/"+path+"/?"+urlencode({"format":"json","page_size":100,**params})
-    rows=[]; ids=set(); total=None; page=1
+    rows=[]; ids=set(); distinct_values=set(); total=None; page=1
     while url:
         d=get(url); p=d["pagination"]; batch=d["results"]
         if total is None:
             total=p["total_entries"]
-            require(isinstance(total,int) and total>0,"Base vazia ou total inválido")
+            require(type(total) is int and total >= (0 if allow_empty else 1),"Base vazia ou total inválido")
             require(expected is None or total==expected,"Total divergente do diagnóstico: "+name)
         require(p["total_entries"]==total and p["page"]==page,"Paginação ou total inconsistente")
-        require(p["start_index"]==len(rows)+1 and p["end_index"]==len(rows)+len(batch),"Intervalo inconsistente")
+        require(isinstance(batch,list) and (bool(batch) or total==0),"Página vazia com registros pendentes")
+        expected_start = len(rows)+1 if total else 0
+        require(p["start_index"]==expected_start and p["end_index"]==len(rows)+len(batch),"Intervalo inconsistente")
         for row in batch:
             require(valid(row),"Registro fora do escopo: "+name)
             require(isinstance(row["id"],int) and row["id"] not in ids,"ID inválido ou repetido")
             ids.add(row["id"])
+            if distinct:
+                value = row[distinct]
+                require(value not in distinct_values,"Valor repetido em "+distinct+": "+name)
+                distinct_values.add(value)
             rows.append({k:row[k] for k in fields})
         next_url=p["links"]["next"]
         require(bool(next_url)==(len(rows)<total),"Fim de paginação inconsistente")
