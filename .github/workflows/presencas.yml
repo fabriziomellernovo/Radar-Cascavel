@@ -1,0 +1,98 @@
+name: Conferência de presenças por sessão
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: 'Execução bem-sucedida da coleta de escopo (vazio usa a mais recente)'
+        required: false
+      retomar:
+        description: 'Execução de presenças com etapas salvas para a mesma base (opcional)'
+        required: false
+  push:
+    branches: [main]
+    paths: ['.github/workflows/presencas.yml']
+permissions:
+  actions: read
+  contents: read
+concurrency:
+  group: radar-cascavel
+  cancel-in-progress: false
+jobs:
+  conferir:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - name: Abrir a base já conferida da legislatura
+        id: origem
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_ID: ${{ inputs.base }}
+          RETOMAR: ${{ inputs.retomar }}
+        run: |
+          set -euo pipefail
+          api="repos/$GITHUB_REPOSITORY/actions"
+          if [[ -z "$BASE_ID" ]]; then
+            BASE_ID=$(gh api "$api/workflows/radar.yml/runs?branch=main&status=success&per_page=1" --jq '.workflow_runs[0].id')
+          fi
+          [[ "$BASE_ID" =~ ^[0-9]+$ ]]
+          meta=$(gh api "$api/runs/$BASE_ID")
+          jq -e '.conclusion == "success" and .head_branch == "main" and .path == ".github/workflows/radar.yml"' <<< "$meta" >/dev/null
+          inicio=$(jq -r '.run_started_at' <<< "$meta")
+          corte=$(TZ=America/Sao_Paulo date --date="$inicio" +%F)
+          gh run download "$BASE_ID" --name coleta-escopo
+          echo "base=$BASE_ID" >> "$GITHUB_OUTPUT"
+          echo "BASE_ID=$BASE_ID" >> "$GITHUB_ENV"
+          echo "CORTE=$corte" >> "$GITHUB_ENV"
+          if [[ -n "$RETOMAR" ]]; then
+            [[ "$RETOMAR" =~ ^[0-9]+$ ]]
+            gh api "$api/runs/$RETOMAR" | jq -e '.head_branch == "main" and .path == ".github/workflows/presencas.yml"' >/dev/null
+            destino=$(mktemp -d)
+            gh run download "$RETOMAR" --pattern "presencas-$BASE_ID-*" --dir "$destino"
+            while IFS= read -r -d '' origem; do
+              alvo="staging/${origem##*/}"
+              if [[ -f "$alvo" ]]; then
+                cmp "$origem" "$alvo"
+              else
+                cp "$origem" "$alvo"
+              fi
+            done < <(find "$destino" -type f -name 'presenca_[0-9]*.json' -print0)
+          fi
+      - name: Conferir a sessão encerrada mais recente
+        run: python3 scripts/presencas.py --base "$BASE_ID" --corte "$CORTE" --limite 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: presencas-${{ steps.origem.outputs.base }}-inicial
+          path: |
+            cobertura.json
+            staging/presenca_*.json
+          overwrite: true
+      - name: Conferir até 60 outras sessões
+        run: python3 scripts/presencas.py --base "$BASE_ID" --corte "$CORTE" --limite 60
+      - uses: actions/upload-artifact@v4
+        with:
+          name: presencas-${{ steps.origem.outputs.base }}-lote1
+          path: |
+            cobertura.json
+            staging/presenca_*.json
+          overwrite: true
+      - name: Conferir até mais 60 sessões
+        run: python3 scripts/presencas.py --base "$BASE_ID" --corte "$CORTE" --limite 60
+      - uses: actions/upload-artifact@v4
+        with:
+          name: presencas-${{ steps.origem.outputs.base }}-lote2
+          path: |
+            cobertura.json
+            staging/presenca_*.json
+          overwrite: true
+      - name: Concluir a conferência do período
+        run: python3 scripts/presencas.py --base "$BASE_ID" --corte "$CORTE"
+      - name: Preservar cobertura e listas verificadas
+        if: always() && steps.origem.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: presencas-${{ steps.origem.outputs.base }}-final
+          path: |
+            cobertura.json
+            staging/presenca_*.json
+          overwrite: true
